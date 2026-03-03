@@ -1,8 +1,8 @@
 const docs = [
-  { label: "Договор оферта", href: "/docs/договор_оферта.docx" },
-  { label: "Политика обработки данных", href: "/docs/политика_обработки_персональных_данных.docx" },
-  { label: "Согласие на обработку данных", href: "/docs/согласие_на_обработку_персональных_данных.docx" },
-  { label: "Согласие на рекламу", href: "/docs/согласие_на_получение_рекламных_материалов.docx" },
+  { label: "Договор оферта", href: "/docs/договор_оферта.html" },
+  { label: "Политика обработки данных", href: "/docs/политика_обработки_персональных_данных.html" },
+  { label: "Согласие на обработку данных", href: "/docs/согласие_на_обработку_персональных_данных.html" },
+  { label: "Согласие на рекламу", href: "/docs/согласие_на_получение_рекламных_материалов.html" },
 ];
 
 const FooterSection = () => (
@@ -27,7 +27,6 @@ const FooterSection = () => (
             href={doc.href}
             target="_blank"
             rel="noopener noreferrer"
-            download
             className="underline underline-offset-2 hover:text-foreground transition-colors"
           >
             {doc.label}

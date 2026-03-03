@@ -63,7 +63,7 @@ const CookieConsent = () => {
           🍪 Мы используем файлы cookie и сервисы аналитики для улучшения работы сайта.
           Продолжая использование, вы соглашаетесь с{" "}
           <a
-            href="https://yandex.ru/legal/confidential/"
+            href="/docs/политика_обработки_персональных_данных.html"
             target="_blank"
             rel="noopener noreferrer"
             className="underline text-primary hover:text-primary/80 transition-colors"
