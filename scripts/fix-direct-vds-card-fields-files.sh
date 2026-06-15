@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p /var/lib/zadachnik/files
+python3 - <<'PY'
+from pathlib import Path
+import re
+p=Path('/opt/zadachnik/server.js')
+s=p.read_text()
+# Ensure server file support imports and table.
+s=s.replace("const http = require('http');", "const http = require('http');\nconst fs = require('fs');\nconst path = require('path');") if "const fs = require('fs');" not in s else s
+s=s.replace("const DB='/var/lib/zadachnik/zadachnik.db'; const PORT=3017;", "const DB='/var/lib/zadachnik/zadachnik.db'; const PORT=3017; const FILE_DIR='/var/lib/zadachnik/files'; fs.mkdirSync(FILE_DIR,{recursive:true});") if "const FILE_DIR" not in s else s
+if 'task_files' not in s:
+    s=s.replace("run(`CREATE TABLE IF NOT EXISTS tasks", "run(`CREATE TABLE IF NOT EXISTS task_files(id INTEGER PRIMARY KEY AUTOINCREMENT,task_id INTEGER NOT NULL,file_name TEXT NOT NULL,file_type TEXT DEFAULT '',file_path TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP);`);\nrun(`CREATE TABLE IF NOT EXISTS tasks")
+# Hide/remove unwanted status and priority visually; keep internal defaults.
+s=s.replace('<select id="tStatus"><option value="new">Новое</option><option value="in_progress">В работе</option><option value="review">Проверка</option><option value="done">Готово</option></select>','<input id="tStatus" type="hidden" value="new">')
+s=s.replace('<select id="tPriority"><option value="low">Низкий приоритет</option><option value="medium">Средний приоритет</option><option value="high">Высокий приоритет</option></select>','<input id="tPriority" type="hidden" value="medium">')
+s=s.replace('<select id="tUrgency"><option value="not_urgent">Не срочно</option><option value="urgent">Срочно</option></select>','<select id="tUrgency"><option value="not_urgent">Не срочно</option><option value="urgent">Срочно</option></select>')
+s=s.replace('<select id="tImportance"><option value="not_important">Не важно</option><option value="important">Важно</option></select>','<select id="tImportance"><option value="not_important">Не важно</option><option value="important">Важно</option></select>')
+# Add labels above selects via placeholders and always-visible files block before footer.
+if 'id="filesBlock"' not in s:
+    s=s.replace('<div class="row" style="justify-content:flex-end;margin-top:16px"><button class="btn ghost" onclick="closeTask()">Закрыть</button><button class="btn" onclick="saveTask()">Сохранить</button></div>', '<div id="filesBlock" style="margin-top:16px;padding:16px;border:1px dashed #cbd5e1;border-radius:22px;background:#f8fafc"><b>Вложения</b><p class="muted">Клик по названию откроет файл. Картинки и PDF откроются в браузере, Word/Excel скачиваются.</p><div id="filesList"><p class="muted">Сначала сохраните задачу, потом прикрепляйте файлы.</p></div><div class="row"><input id="fileInput" type="file" class="input"><button class="btn ghost" onclick="uploadFile()">Загрузить файл</button></div></div><div class="row" style="justify-content:flex-end;margin-top:16px"><button class="btn ghost" onclick="closeTask()">Закрыть</button><button class="btn" onclick="saveTask()">Сохранить</button></div>')
+# Add client file functions if missing.
+if 'async function loadFiles()' not in s:
+    s=s.replace('function closeTask(){modal.classList.remove(\'open\')}', '''function closeTask(){modal.classList.remove('open')}async function loadFiles(){if(!editing){filesList.innerHTML='<p class="muted">Сначала сохраните задачу, потом прикрепляйте файлы.</p>';return}const files=await fetch(api('/files?task_id='+editing)).then(r=>r.json());filesList.innerHTML=files.map(f=>'<div class="row" style="justify-content:space-between;background:white;border-radius:14px;padding:10px;margin:8px 0"><button class="btn ghost" onclick="previewFile('+f.id+',\\\''+f.file_type+'\\\')">'+f.file_name+'</button><span><a class="btn ghost" href="/zadachnik/api/files/'+f.id+'/download">Скачать</a> <button class="btn ghost" onclick="deleteFile('+f.id+')">Удалить</button></span></div>').join('')||'<p class="muted">Файлов пока нет</p>'}function previewFile(id,type){const url='/zadachnik/api/files/'+id+'/download';if((type||'').startsWith('image/')||type==='application/pdf'){window.open(url,'_blank')}else{alert('Предпросмотр недоступен. Нажмите Скачать.')}}async function uploadFile(){if(!editing)return alert('Сначала сохраните задачу');const f=fileInput.files[0];if(!f)return;const data=await new Promise(r=>{const reader=new FileReader();reader.onload=()=>r(reader.result.split(',')[1]);reader.readAsDataURL(f)});await fetch(api('/files'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:editing,file_name:f.name,file_type:f.type,data})});fileInput.value='';await loadFiles()}async function deleteFile(id){if(!confirm('Удалить файл?'))return;await fetch(api('/files/'+id),{method:'DELETE'});await loadFiles()}''')
+    s=s.replace("tDue.value=t.due_at||''", "tDue.value=t.due_at||'';loadFiles()")
+# Add backend routes if missing.
+if "req.url==='/zadachnik/api/files'" not in s:
+    marker="res.writeHead(404);res.end('Not found')"
+    s=s.replace(marker, """if(req.url.startsWith('/zadachnik/api/files/')&&req.url.endsWith('/download')&&req.method==='GET'){const id=Number(req.url.split('/')[4]);const rows=JSON.parse(sh(`SELECT * FROM task_files WHERE id=${id}`));if(!rows[0]){res.writeHead(404);return res.end('Not found')}const f=rows[0];res.writeHead(200,{'Content-Type':f.file_type||'application/octet-stream','Content-Disposition':`inline; filename=\"${encodeURIComponent(f.file_name)}\"`});return fs.createReadStream(f.file_path).pipe(res)}if(req.url.startsWith('/zadachnik/api/files/')&&req.method==='DELETE'){const id=Number(req.url.split('/')[4]);const rows=JSON.parse(sh(`SELECT * FROM task_files WHERE id=${id}`));if(rows[0]){try{fs.unlinkSync(rows[0].file_path)}catch{}run(`DELETE FROM task_files WHERE id=${id}`)}res.writeHead(200);return res.end('{}')}if(req.url.startsWith('/zadachnik/api/files?')&&req.method==='GET'){const u=new URL(req.url,'http://x');const task=Number(u.searchParams.get('task_id'));res.writeHead(200,{'Content-Type':'application/json'});return res.end(sh(`SELECT id,task_id,file_name,file_type,created_at FROM task_files WHERE task_id=${task} ORDER BY id DESC`))}if(req.url==='/zadachnik/api/files'&&req.method==='POST'){const b=await body(req);const safe=Date.now()+'_'+String(b.file_name||'file').replace(/[^a-zA-Z0-9а-яА-Я._-]/g,'_');const filePath=path.join(FILE_DIR,safe);fs.writeFileSync(filePath,Buffer.from(b.data,'base64'));run(`INSERT INTO task_files(task_id,file_name,file_type,file_path) VALUES(${Number(b.task_id)},'${esc(b.file_name)}','${esc(b.file_type)}','${esc(filePath)}')`);res.writeHead(200);return res.end('{}')}"""+marker)
+p.write_text(s)
+PY
+systemctl restart zadachnik.service
+systemctl status zadachnik.service --no-pager
+printf '\nГотово. Обнови страницу: http://80.74.30.154/zadachnik/\n'
